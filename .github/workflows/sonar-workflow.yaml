@@ -1,0 +1,88 @@
+name: oyo-lite deployment
+
+on:
+  push:
+    branches:
+      - master
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Check if sonar-project.properties exists
+        id: check_sonar_properties
+        shell: bash
+        run: |
+          if test -f sonar-project.properties; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+      - name: If Sonar Properties Exist, fetch them
+        id: fetch_sonar_properties
+        if: ${{ steps.check_sonar_properties.outputs.exists == 'true' }}
+        shell: bash
+        run: |
+          sed -e 's/ //g' sonar-project.properties > sonar-project1.properties
+          cp sonar-project1.properties sonar-project.properties 
+          # Extract properties from sonar-project.properties
+          sourceDir=$(awk -F'=' '/^sonar.sources=/ {print $2}' sonar-project.properties)
+          projectKey=$(awk -F'=' '/^sonar.projectKey=/ {print $2}' sonar-project.properties)
+          javaBinaries=$(awk -F'=' '/^sonar.java.binaries=/ {print $2}' sonar-project.properties)
+          exclusions=$(awk -F'=' '/^sonar.exclusions=/ {print $2}' sonar-project.properties)\
+  
+          # Check if any required properties are empty
+          if [ -z "$sourceDir" ]; then
+            echo "sourceDir is empty"
+          else
+            echo "sourceDir: $sourceDir"
+            echo "sourceDir=$sourceDir" >> $GITHUB_OUTPUT
+          fi
+  
+          if [ -z "$projectKey" ]; then
+            echo "projectKey is empty"
+          else
+            echo "projectKey: $projectKey"
+            echo "projectKey=$projectKey" >> $GITHUB_OUTPUT
+          fi
+  
+          if [ -z "$javaBinaries" ]; then
+            echo "sonar.java.binaries is empty"
+          else
+            echo "sonar.java.binaries: $javaBinaries"
+            echo "javaBinaries=$javaBinaries" >> $GITHUB_OUTPUT
+          fi
+  
+          if [ -z "$exclusions" ]; then
+            echo "sonar.exclusions is empty"
+          else
+            echo "sonar.exclusions: $exclusions"
+            echo "exclusions=$exclusions" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+      - name: Prepare SonarQube Args
+        if: ${{ steps.check_sonar_properties.outputs.exists == 'true' && steps.fetch_sonar_properties.outputs.sourceDir != '' && steps.fetch_sonar_properties.outputs.projectKey != '' }}
+        id: prepare_args
+        run: |
+          args="-Dsonar.projectKey=${{ steps.fetch_sonar_properties.outputs.projectKey }}"
+          if [ -n "${{ steps.fetch_sonar_properties.outputs.javaBinaries }}" ]; then
+            args="$args -Dsonar.java.binaries=${{ steps.fetch_sonar_properties.outputs.javaBinaries }}"
+          fi
+          if [ -n "${{ steps.fetch_sonar_properties.outputs.exclusions }}" ]; then
+            args="$args -Dsonar.java.binaries=${{ steps.fetch_sonar_properties.outputs.exclusions }}"
+          fi
+          echo args $args
+          echo "args=$args" >> $GITHUB_OUTPUT
+      - name: SonarQube Scan
+        if: ${{ steps.check_sonar_properties.outputs.exists == 'true' && steps.fetch_sonar_properties.outputs.sourceDir != '' && steps.fetch_sonar_properties.outputs.projectKey != '' && steps.fetch_sonar_properties.outputs.javaBinaries == '' }}
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_HOST_URL: https://sonarqube.oyorooms.io
+          SONAR_TOKEN: squ_07c5cafc2f21f97f199589562294b32c7f61909f
+        with:
+          projectBaseDir: ${{ steps.fetch_sonar_properties.outputs.sourceDir }}
+          args: ${{ steps.prepare_args.outputs.args }}
+        
